@@ -1,0 +1,174 @@
+
+secrets:
+  jwt_secret_key:
+    file: jwt_secret_key.txt
+  crypto_key:
+    file: crypto_key.txt
+
+
+services:
+  tbsky-session:
+    restart: always
+    build:
+      context: ./tbsky-session
+      target: prod
+    depends_on:
+      - tbsky-session-db
+      - redis
+    deploy:
+      mode: replicated
+      endpoint_mode: vip
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    
+    volumes:
+      - ./tbsky-session:/app
+    command: poetry run start
+    env_file:
+      - path: .env
+        required: true
+    secrets:
+      - jwt_secret_key
+    environment:
+      SECURITY_SECRET_KEY: /run/secrets/jwt_secret_key
+      # Server
+      SERVER_PORT: 8001
+      SERVER_HOST: 0.0.0.0
+      # Database
+      DB_DATABASE_URL: postgresql+asyncpg://postgres:postgres@tbsky-session-db:5432/tbsky-session-db
+      DB_REDIS_DSN: redis://redis:6379/0
+    networks:
+      - backend
+
+  tbsky-booking:
+    restart: always
+    build:
+      context: ./tbsky-booking
+      target: prod
+    depends_on:
+      - tbsky-booking-db
+      - redis
+    volumes:
+      - ./tbsky-booking:/app
+    deploy:
+      mode: replicated
+      endpoint_mode: vip
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    
+
+    command: poetry run start
+    env_file:
+      - path: .env
+        required: true
+    secrets:
+      - crypto_key
+      - jwt_secret_key
+    environment:
+      # Security
+      SECURITY_SECRET_KEY: /run/secrets/jwt_secret_key
+      SECURITY_CRYPTO_KEY: /run/secrets/crypto_key
+      # Server
+      SERVER_PORT: 8002
+      SERVER_HOST: 0.0.0.0
+      # Database
+      DB_DATABASE_URL: postgresql+asyncpg://postgres:postgres@tbsky-booking-db:5432/tbsky-booking-db
+      DB_REDIS_DSN: redis://redis:6379/0
+    networks:
+      - backend
+
+  tbsky-session-db:
+    restart: always
+    image: postgres:13.16-bookworm
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tbsky-session-db
+
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+    volumes:
+      - tbsky-session-db-data:/var/lib/postgresql/data
+
+  tbsky-booking-db:
+    restart: always
+    image: postgres:13.16-bookworm
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tbsky-booking-db
+    ports:
+      - "5555:5432"
+    networks:
+      - backend
+    volumes:
+      - tbsky-booking-db-data:/var/lib/postgresql/data
+
+  redis:
+    restart: always
+    image: redis:7
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+    volumes:
+      - redis_data:/data
+
+  load-balancer:
+    restart: always
+    image: haproxy:2.8
+    ports:
+      - "8080:8080"
+    depends_on:
+      - tbsky-session
+      - tbsky-booking
+    volumes:
+      - ./haproxy:/usr/local/etc/haproxy
+    networks:
+      - backend
+  
+  tbsky-frontend:
+    build:
+      context: ./tbsky-frontend
+      target: dev
+    ports:
+      - "80:3000"
+    networks:
+      - backend
+    depends_on:
+      - load-balancer
+
+    deploy:
+      mode: replicated
+      endpoint_mode: vip
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+volumes:
+    tbsky-session-db-data:
+        driver: local
+    tbsky-booking-db-data:
+        driver: local
+    redis_data:
+        driver: local
+
+networks:
+  backend:
+  

@@ -1,0 +1,93 @@
+
+secrets:
+  jwt_secret_key:
+    file: jwt_secret_key_test.txt
+  crypto_key:
+    file: crypto_key_test.txt
+
+
+services:
+  tbsky-session-test:
+    build:
+      context: ./tbsky-session
+      target: dev
+    depends_on:
+      - tbsky-session-db-test
+      - redis-test
+
+    volumes:
+      - ./tbsky-session:/app
+    env_file:
+      - path: .env.testing
+        required: true
+    secrets:
+      - jwt_secret_key
+    environment:
+      SECURITY_SECRET_KEY: /run/secrets/jwt_secret_key
+      # Server
+      SERVER_PORT: 8001
+      SERVER_HOST: 0.0.0.0
+      # Database
+      DB_DATABASE_URL: postgresql+asyncpg://postgres:postgres@tbsky-session-db-test:5432/tbsky-session-db
+      DB_REDIS_DSN: redis://redis-test:6379/0
+    networks:
+      - backend-test
+
+  tbsky-booking-test:
+    build:
+      context: ./tbsky-booking
+      target: dev
+    depends_on:
+      - tbsky-booking-db-test
+      - redis-test
+    volumes:
+      - ./tbsky-booking:/app
+
+    env_file:
+      - path: .env.testing
+        required: true
+    secrets:
+      - crypto_key
+      - jwt_secret_key
+    environment:
+      # Security
+      SECURITY_SECRET_KEY: /run/secrets/jwt_secret_key
+      SECURITY_CRYPTO_KEY: /run/secrets/crypto_key
+      # Server
+      SERVER_PORT: 8002
+      SERVER_HOST: 0.0.0.0
+      # Database
+      DB_DATABASE_URL: postgresql+asyncpg://postgres:postgres@tbsky-booking-db-test:5432/tbsky-booking-db
+      DB_REDIS_DSN: redis://redis-test:6379/0
+    networks:
+      - backend-test
+
+  tbsky-session-db-test:
+    image: postgres:13.16-bookworm
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tbsky-session-db
+
+    networks:
+      - backend-test
+
+  tbsky-booking-db-test:
+    restart: always
+    image: postgres:13.16-bookworm
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: tbsky-booking-db
+    networks:
+      - backend-test
+
+  redis-test:
+    restart: always
+    image: redis:7
+    networks:
+      - backend-test
+
+networks:
+  backend-test:
+  
